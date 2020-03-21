@@ -3,6 +3,7 @@
 # required package
 library(dplyr)
 library(ggplot2)
+library(car)
 
 # set directory
 setwd("~/Desktop/1EE/STA437 2020winter/Final Project STA437") # should be changed
@@ -12,6 +13,8 @@ happiness_dt <- read.csv('happiness2017.csv')
 
 # delete variable 'country'
 # happiness_dt <- happiness_dt %>% select(-c(country))
+
+#' --------------------------------------------------------------------------------------------------------------------------
 
 # Data manipulation and summary
 
@@ -23,6 +26,8 @@ dt <- sample_n(happiness_dt, 100)
 # dt <- dt[sample(nrow(happiness_dt),100),]
 
 ## Exploratory data analysis (EDA)
+
+par(mfrow=c(1,2))
 
 ### distribution of happiness score (dependent variable)
 ggplot(dt, aes(x = Ladder)) + geom_histogram() + labs(x = "Happiness Score", y = 'Count', title = 'Histogram: happiness score')
@@ -84,3 +89,33 @@ dt$country[is.na(dt$gini)]
 # Impute NA's with median (should use sth else) make a resonable guess
 dt$gini[is.na(dt$gini)] <- median(dt$gini, na.rm = T)
 ggplot(dt, aes(x = gini)) + geom_histogram() + labs(x = "Gini of income", y = 'Count', title = 'Histogram: Gini of income')
+
+## Some useful code for manipulation
+### delete the minimal/maximum (outlier) point
+#1. make a copy of data
+dt1 <- dt
+#2. subsetting
+dt1 <- dt1 %>% filter(Corruption != min(Corruption))
+
+### make a transformation
+#### log transformation
+dt1$Ladder <- log(dt1$Ladder)
+#### square root transformation
+dt1$Ladder <- sqrt(dt1$Ladder)
+#### power transformation 0.25
+dt1$Ladder <- (dt1$Ladder^0.25-1)/0.25
+
+#' --------------------------------------------------------------------------------------------------------------------------
+
+# Multiple Linear Model using Original variables
+
+## Check Nomality
+original_dt <- dt %>% select(-c(country))
+linear_reg1 <- lm(Ladder ~ LogGDP + Social + HLE + Freedom + Generosity + Corruption + Positive + Negative + gini, 
+                  data = original_dt)
+summary(linear_reg1)
+qqnorm(linear_reg1$residuals); qqline(linear_reg1$residuals)
+shapiro.test(linear_reg1$residuals)
+
+## Check Multicollinearity
+vif(linear_reg1)
