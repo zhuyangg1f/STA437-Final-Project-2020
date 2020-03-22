@@ -4,6 +4,10 @@
 library(dplyr)
 library(ggplot2)
 library(car)
+library(MVN)
+library(RVAideMemoire)
+library(MASS)
+library(lmtest)
 
 # set directory
 setwd("~/Desktop/1EE/STA437 2020winter/Final Project STA437") # should be changed
@@ -109,7 +113,7 @@ dt1$Ladder <- (dt1$Ladder^0.25-1)/0.25
 
 # Multiple Linear Model using Original variables
 
-## Check Nomality
+## Check Normality
 original_dt <- dt %>% select(-c(country))
 linear_reg1 <- lm(Ladder ~ LogGDP + Social + HLE + Freedom + Generosity + Corruption + Positive + Negative + gini, 
                   data = original_dt)
@@ -117,5 +121,167 @@ summary(linear_reg1)
 qqnorm(linear_reg1$residuals); qqline(linear_reg1$residuals)
 shapiro.test(linear_reg1$residuals)
 
+linear_reg2 <- lm(Ladder ~ LogGDP + Social + HLE + Freedom + Positive, 
+                  data = original_dt)
+summary(linear_reg2)
+qqnorm(linear_reg2$residuals); qqline(linear_reg2$residuals)
+shapiro.test(linear_reg2$residuals)
+
+lrtest(linear_reg1, linear_reg2)
+## !!! Please note that linear regression assumes residual errors \epsilon which represent variation in 
+## which is not explained by the predictors that the outcome is normally distributed.
+
+## reference: https://cran.r-project.org/web/packages/MVN/vignettes/MVN.pdf
+
+indep_dt <- original_dt %>% select(-Ladder)
+## Check normality by using 'MVN' package
+norm_mardia <- mvn(data = indep_dt, mvnTest = "mardia",multivariatePlot = "qq"); norm_mardia
+norm_hz <- mvn(data = indep_dt, mvnTest = "hz"); norm_hz
+
+# Check normality by using 'RVAideMemoire' package
+mshapiro.test(indep_dt)
+
+# Box-Cox Transformation
+# make all values to be positive
+trans_dt <- original_dt
+trans_dt[,2:10] <- trans_dt[,2:10] + 1
+for (i in 2:10) {
+  bc <- boxcox(trans_dt[,i] ~ 1)
+  lambda <- bc$x[which.max(bc$y)]
+  trans_dt[,i] <- (trans_dt[,i]^lambda-1)/lambda
+}
+mshapiro.test(trans_dt)
+
+### Check Normality again
+norm_mardia <- mvn(data = trans_dt, mvnTest = "mardia",multivariatePlot = "qq"); norm_mardia
+### Still not normal
+
+# Multiple Linear Model using transformed variables
+linear_reg3 <- lm(Ladder ~ LogGDP + Social + HLE + Freedom + Generosity + Corruption + Positive + Negative + gini, 
+                  data = trans_dt)
+summary(linear_reg3)
+qqnorm(linear_reg3$residuals); qqline(linear_reg3$residuals)
+shapiro.test(linear_reg3$residuals) # Does not change the conclusion
+
 ## Check Multicollinearity
 vif(linear_reg1)
+cor_tbl <- cor(original_dt)
+cor_tbl >= 0.8 ## No Multicollinearity
+
+#' --------------------------------------------------------------------------------------------------------------------------
+
+# Multiple Linear Model using Principal Components
+n = 100
+X= as.matrix(original_dt[2:10])
+x.bar = apply(X,2,mean) # 2 indicates columns
+x.bar
+S = cov(X)
+round(S, 3)
+# to get the PCs, first find the eigenvalues and eigenvectors
+
+Val = eigen(S)$values
+Vec = eigen(S)$vectors
+
+# Get PCs
+W = X  # just to create a data matrix of the same size of X
+
+# now fill in the entries by calculating sample PCs
+
+for(i in 1:9){
+  for(j in 1:100){
+    W[j,i] = Vec[,i] %*% ( X[j,] -x.bar)  # centered PCs
+  }}
+
+colnames(W) = paste("W", 1:9, sep="")
+
+# PCs plot
+plot(Val, type="b")  # suggests keeping the first PC only!
+
+# Proportion of variation explained by each PC:
+
+round( Val/sum(Val),3)  # 99.1 % of the sample variation in X is explained by the first PC.
+
+# Now let's run regression with the first PC as the explanatory variable:
+##############################################################################
+
+PC.model = lm(original_dt$Ladder ~ W[,1]) # first column = first pc
+summary(PC.model)  # W1 is not found significant! adj.R^2 is too low (negative!)
+
+# however, if we add W2 (or even more PCs) we would find them significant:
+
+PC.model.2 = lm(original_dt$Ladder ~  W[,1] + W[,2] + W[,3]+ W[,4] + W[,5] + W[,6] + W[,7]+ W[,8] + W[,9])
+summary(PC.model.2)  
+
+lrtest(PC.model,PC.model.2)
+
+# obtain the standardized variables:
+
+Z = X
+for(i in 1:9){
+  Z[,i] = (X[,i]-x.bar[i])/sqrt(diag(S)[i])
+}
+
+# obtain correlation matrix
+R = cor(X)
+cov(Z)  # they should be the same!
+
+# obtain eigenvalues and eigenvectors of R
+Val.new = eigen(R)$values
+round(Val.new ,2)
+
+Vec.new = eigen(R)$vectors
+rownames(Vec.new) = colnames(X)
+colnames(Vec.new) = paste("Z", 1:9, sep="")
+round(Vec.new ,2)
+
+
+# Obtain sample PC values:
+
+W.new = X  # just to create a data matrix of the same size of X
+colnames(W.new) = paste("Z", 1:9, sep="")
+
+# now fill in the entries by calculating sample PCs
+
+for(i in 1:9){ # PC's
+  for(j in 1:100){
+    W.new[j,i] = Vec.new[,i] %*% Z[j,]   # no need to center when using normalized PCCs 
+  }}
+
+# How many components should we keep? 
+
+plot(Val.new, type="b", pch=19, xlab="",ylab="Variances")  # suggests keeping the first 4 or 5 PCs.
+
+# Proportion of variation explained by each PC:
+
+round( Val.new/sum(Val.new),3)  
+
+
+# Regression with all standardized PCs as the explanatory variables
+##############################################################################
+
+PC.model.new.1 = lm(original_dt$Ladder ~  W.new[,1] + W.new[,2] + W.new[,3] + W.new[,4] + W.new[,5] +
+                      W.new[,6] + W.new[,7] + W.new[,8] + W.new[,9])
+summary(PC.model.new.1)  # W2 and W6,7,8,9 seem not to be significant
+
+# Let's remove W3.new and W5.new
+
+PC.model.new.2 = lm(original_dt$Ladder ~  W.new[,1] + W.new[,3] + W.new[,4] + W.new[,5])
+summary(PC.model.new.2) 
+
+# the correlations between PCs and variables also indicate importance:
+
+cor.WX = function(mat){
+  vals= mat
+  rownames(vals) = paste("X", 1:nrow(mat), sep="")
+  colnames(vals) = paste("W", 1:nrow(mat), sep="")
+  
+  for(i in 1: ncol(vals)){
+    val= t(eigen(mat)$vectors[,i])* sqrt( eigen(mat)$values[i])
+    vals[,i] = val/sqrt(diag(mat))
+  }
+  return(vals)
+  
+}
+
+cor.WX(R)
+```
